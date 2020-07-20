@@ -1,4 +1,4 @@
-describe("bold button", function(){
+xdescribe("bold button", function(){
   //create a new pad before each test run
   beforeEach(function(cb){
     helper.newPad(cb);
