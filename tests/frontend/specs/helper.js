@@ -1,4 +1,4 @@
-describe("the test helper", function(){
+xdescribe("the test helper", function(){
   describe("the newPad method", function(){
     xit("doesn't leak memory if you creates iframes over and over again", function(done){
       this.timeout(100000);

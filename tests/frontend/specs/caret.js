@@ -1,4 +1,4 @@
-describe("As the caret is moved is the UI properly updated?", function(){
+xdescribe("As the caret is moved is the UI properly updated?", function(){
   var padName;
   var numberOfRows = 50;
 /*

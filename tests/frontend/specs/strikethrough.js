@@ -1,4 +1,4 @@
-describe("strikethrough button", function(){
+xdescribe("strikethrough button", function(){
   //create a new pad before each test run
   beforeEach(function(cb){
     helper.newPad(cb);

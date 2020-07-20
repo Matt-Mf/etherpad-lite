@@ -1,4 +1,4 @@
-describe("embed links", function(){
+xdescribe("embed links", function(){
   var objectify = function (str)
   {
     var hash = {};

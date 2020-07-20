@@ -1,4 +1,4 @@
-describe("chat-load-messages", function(){
+xdescribe("chat-load-messages", function(){
   var padName;
 
   it("creates a pad", function(done) {
