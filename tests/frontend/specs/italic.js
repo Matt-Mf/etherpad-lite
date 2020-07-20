@@ -1,4 +1,4 @@
-describe("italic some text", function(){
+xdescribe("italic some text", function(){
   //create a new pad before each test run
   beforeEach(function(cb){
     helper.newPad(cb);
