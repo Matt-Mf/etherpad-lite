@@ -131,7 +131,7 @@ $(function(){
         stats.end = new Date;
         stats.duration = stats.end - stats.start;
         var minutes = Math.floor(stats.duration / 1000 / 60);
-        var seconds = Math.round((stats.duration / 1000) % 60).toString().padStart("2","0");
+        var seconds = Math.round((stats.duration / 1000) % 60) // chrome < 57 does not like this .toString().padStart("2","0");
         if(stats.tests >= total){
           append("FINISHED -", stats.passes, "tests passed,", stats.failures, "tests failed,", stats.pending," pending, duration: " + minutes + ":" + seconds);
         }
