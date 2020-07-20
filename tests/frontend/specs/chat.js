@@ -1,4 +1,4 @@
-xdescribe("Chat messages and UI", function(){
+describe("Chat messages and UI", function(){
   //create a new pad before each test run
   beforeEach(function(cb){
     helper.newPad(cb);
