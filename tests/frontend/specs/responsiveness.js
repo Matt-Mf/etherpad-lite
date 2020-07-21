@@ -13,7 +13,7 @@
 
 // Adapted from John McLear's original test case.
 
-xdescribe('Responsiveness of Editor', function() {
+describe('Responsiveness of Editor', function() {
   // create a new pad before each test run
   beforeEach(function(cb) {
     helper.newPad(cb);
