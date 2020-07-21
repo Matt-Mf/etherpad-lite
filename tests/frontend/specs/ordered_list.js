@@ -1,4 +1,4 @@
-describe("assign ordered list", function(){
+xdescribe("assign ordered list", function(){
   //create a new pad before each test run
   beforeEach(function(cb){
     helper.newPad(cb);

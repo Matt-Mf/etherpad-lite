@@ -1,4 +1,4 @@
-describe('Pad modal', function() {
+xdescribe('Pad modal', function() {
   context('when modal is a "force reconnect" message', function() {
     var MODAL_SELECTOR = '#connectivity';
 
