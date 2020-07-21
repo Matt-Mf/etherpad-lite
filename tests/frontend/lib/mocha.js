@@ -204,8 +204,8 @@ global.mocha = mocha;
 module.exports = global;
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./lib/mocha":14,"_process":69,"browser-stdout":41}],2:[function(require,module,exports){
-(function (process,global){
+},{"./lib/mocha":14,"_process":68,"browser-stdout":41}],2:[function(require,module,exports){
+(function (global){
 'use strict';
 
 /**
@@ -219,6 +219,7 @@ module.exports = global;
 var Date = global.Date;
 var setTimeout = global.setTimeout;
 var EVENT_RUN_END = require('../runner').constants.EVENT_RUN_END;
+var isBrowser = require('../utils').isBrowser;
 
 /**
  * Checks if browser notification support exists.
@@ -233,7 +234,7 @@ var EVENT_RUN_END = require('../runner').constants.EVENT_RUN_END;
 exports.isCapable = function() {
   var hasNotificationSupport = 'Notification' in window;
   var hasPromiseSupport = typeof Promise === 'function';
-  return process.browser && hasNotificationSupport && hasPromiseSupport;
+  return isBrowser() && hasNotificationSupport && hasPromiseSupport;
 };
 
 /**
@@ -375,8 +376,8 @@ function notPermitted(err) {
   console.error('notification error:', err.message);
 }
 
-}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"../../package":90,"../runner":34,"_process":69}],3:[function(require,module,exports){
+}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"../../package":89,"../runner":34,"../utils":38}],3:[function(require,module,exports){
 'use strict';
 
 /**
@@ -563,21 +564,6 @@ Context.prototype.timeout = function(ms) {
 };
 
 /**
- * Set test timeout `enabled`.
- *
- * @private
- * @param {boolean} enabled
- * @return {Context} self
- */
-Context.prototype.enableTimeouts = function(enabled) {
-  if (!arguments.length) {
-    return this.runnable().enableTimeouts();
-  }
-  this.runnable().enableTimeouts(enabled);
-  return this;
-};
-
-/**
  * Set or get test slowness threshold `ms`.
  *
  * @private
@@ -686,7 +672,12 @@ var constants = {
   /**
    * Invalid state transition occuring in `Mocha` instance
    */
-  INSTANCE_ALREADY_DISPOSED: 'ERR_MOCHA_INSTANCE_ALREADY_DISPOSED'
+  INSTANCE_ALREADY_DISPOSED: 'ERR_MOCHA_INSTANCE_ALREADY_DISPOSED',
+
+  /**
+   * Use of `only()` w/ `--forbid-only` results in this error.
+   */
+  FORBIDDEN_EXCLUSIVITY: 'ERR_MOCHA_FORBIDDEN_EXCLUSIVITY'
 };
 
 /**
@@ -913,6 +904,23 @@ function createMultipleDoneError(runnable, originalErr) {
   return err;
 }
 
+/**
+ * Creates an error object to be thrown when `.only()` is used with
+ * `--forbid-only`.
+ * @public
+ * @param {Mocha} mocha - Mocha instance
+ * @returns {Error} Error with code {@link constants.FORBIDDEN_EXCLUSIVITY}
+ */
+function createForbiddenExclusivityError(mocha) {
+  var err = new Error(
+    mocha.isWorker
+      ? '`.only` is not supported in parallel mode'
+      : '`.only` forbidden by --forbid-only'
+  );
+  err.code = constants.FORBIDDEN_EXCLUSIVITY;
+  return err;
+}
+
 module.exports = {
   createInvalidArgumentTypeError: createInvalidArgumentTypeError,
   createInvalidArgumentValueError: createInvalidArgumentValueError,
@@ -927,10 +935,11 @@ module.exports = {
   createMochaInstanceAlreadyRunningError: createMochaInstanceAlreadyRunningError,
   createFatalError: createFatalError,
   createMultipleDoneError: createMultipleDoneError,
+  createForbiddenExclusivityError: createForbiddenExclusivityError,
   constants: constants
 };
 
-},{"util":89}],7:[function(require,module,exports){
+},{"util":88}],7:[function(require,module,exports){
 'use strict';
 
 var Runnable = require('./runnable');
@@ -984,6 +993,30 @@ Hook.prototype.error = function(err) {
   }
 
   this._error = err;
+};
+
+/**
+ * Returns an object suitable for IPC.
+ * Functions are represented by keys beginning with `$$`.
+ * @private
+ * @returns {Object}
+ */
+Hook.prototype.serialize = function serialize() {
+  return {
+    $$isPending: this.isPending(),
+    $$titlePath: this.titlePath(),
+    ctx: {
+      currentTest: {
+        title: this.ctx && this.ctx.currentTest && this.ctx.currentTest.title
+      }
+    },
+    parent: {
+      root: this.parent.root,
+      title: this.parent.title
+    },
+    title: this.title,
+    type: this.type
+  };
 };
 
 },{"./runnable":33,"./utils":38}],8:[function(require,module,exports){
@@ -1113,6 +1146,7 @@ var Suite = require('../suite');
 var errors = require('../errors');
 var createMissingArgumentError = errors.createMissingArgumentError;
 var createUnsupportedError = errors.createUnsupportedError;
+var createForbiddenExclusivityError = errors.createForbiddenExclusivityError;
 
 /**
  * Functions common to more than one interface.
@@ -1202,6 +1236,9 @@ module.exports = function(suites, context, mocha) {
        * @returns {Suite}
        */
       only: function only(opts) {
+        if (mocha.options.forbidOnly) {
+          throw createForbiddenExclusivityError(mocha);
+        }
         opts.isOnly = true;
         return this.create(opts);
       },
@@ -1235,16 +1272,14 @@ module.exports = function(suites, context, mocha) {
         suite.file = opts.file;
         suites.unshift(suite);
         if (opts.isOnly) {
-          if (mocha.options.forbidOnly && shouldBeTested(suite)) {
-            throw createUnsupportedError('`.only` forbidden');
-          }
-
-          suite.parent.appendOnlySuite(suite);
+          suite.markOnly();
         }
-        if (suite.pending) {
-          if (mocha.options.forbidPending && shouldBeTested(suite)) {
-            throw createUnsupportedError('Pending test forbidden');
-          }
+        if (
+          suite.pending &&
+          mocha.options.forbidPending &&
+          shouldBeTested(suite)
+        ) {
+          throw createUnsupportedError('Pending test forbidden');
         }
         if (typeof opts.fn === 'function') {
           opts.fn.call(suite);
@@ -1275,8 +1310,9 @@ module.exports = function(suites, context, mocha) {
        * @returns {*}
        */
       only: function(mocha, test) {
-        if (mocha.options.forbidOnly)
-          throw createUnsupportedError('`.only` forbidden');
+        if (mocha.options.forbidOnly) {
+          throw createForbiddenExclusivityError(mocha);
+        }
         test.markOnly();
         return test;
       },
@@ -1583,7 +1619,7 @@ module.exports.description =
   'traditional "suite"/"test" instead of BDD\'s "describe"/"it"';
 
 },{"../suite":36,"../test":37,"./common":9}],14:[function(require,module,exports){
-(function (process,global){
+(function (global){
 'use strict';
 
 /*!
@@ -1595,12 +1631,14 @@ module.exports.description =
 var escapeRe = require('escape-string-regexp');
 var path = require('path');
 var builtinReporters = require('./reporters');
-var growl = require('./growl');
+var growl = require('./nodejs/growl');
 var utils = require('./utils');
 var mocharc = require('./mocharc.json');
 var errors = require('./errors');
 var Suite = require('./suite');
-var esmUtils = utils.supportsEsModules() ? require('./esm-utils') : undefined;
+var esmUtils = utils.supportsEsModules(true)
+  ? require('./esm-utils')
+  : undefined;
 var createStatsCollector = require('./stats-collector');
 var createInvalidReporterError = errors.createInvalidReporterError;
 var createInvalidInterfaceError = errors.createInvalidInterfaceError;
@@ -1612,6 +1650,7 @@ var EVENT_FILE_PRE_REQUIRE = Suite.constants.EVENT_FILE_PRE_REQUIRE;
 var EVENT_FILE_POST_REQUIRE = Suite.constants.EVENT_FILE_POST_REQUIRE;
 var EVENT_FILE_REQUIRE = Suite.constants.EVENT_FILE_REQUIRE;
 var sQuote = utils.sQuote;
+var debug = require('debug')('mocha:mocha');
 
 exports = module.exports = Mocha;
 
@@ -1643,7 +1682,7 @@ var mochaStates = utils.defineConstants({
  * To require local UIs and reporters when running in node.
  */
 
-if (!process.browser && typeof module.paths !== 'undefined') {
+if (!utils.isBrowser() && typeof module.paths !== 'undefined') {
   var cwd = utils.cwd();
   module.paths.push(cwd, path.join(cwd, 'node_modules'));
 }
@@ -1652,11 +1691,6 @@ if (!process.browser && typeof module.paths !== 'undefined') {
  * Expose internals.
  */
 
-/**
- * @public
- * @class utils
- * @memberof Mocha
- */
 exports.utils = utils;
 exports.interfaces = require('./interfaces');
 /**
@@ -1704,8 +1738,11 @@ exports.Test = require('./test');
  * @param {number} [options.slow] - Slow threshold value.
  * @param {number|string} [options.timeout] - Timeout threshold value.
  * @param {string} [options.ui] - Interface name.
+ * @param {boolean} [options.parallel] - Run jobs in parallel
+ * @param {number} [options.jobs] - Max number of worker processes for parallel runs
  * @param {MochaRootHookObject} [options.rootHooks] - Hooks to bootstrap the root
  * suite with
+ * @param {boolean} [options.isWorker] - Should be `true` if `Mocha` process is running in a worker process.
  */
 function Mocha(options) {
   options = utils.assign({}, mocharc, options || {});
@@ -1714,6 +1751,7 @@ function Mocha(options) {
   // root suite
   this.suite = new exports.Suite('', new exports.Context(), true);
   this._cleanReferencesAfterRun = true;
+  this._state = mochaStates.INIT;
 
   this.grep(options.grep)
     .fgrep(options.fgrep)
@@ -1756,6 +1794,39 @@ function Mocha(options) {
 
   if (options.rootHooks) {
     this.rootHooks(options.rootHooks);
+  }
+
+  /**
+   * The class which we'll instantiate in {@link Mocha#run}.  Defaults to
+   * {@link Runner} in serial mode; changes in parallel mode.
+   * @memberof Mocha
+   * @private
+   */
+  this._runnerClass = exports.Runner;
+
+  /**
+   * Whether or not to call {@link Mocha#loadFiles} implicitly when calling
+   * {@link Mocha#run}.  If this is `true`, then it's up to the consumer to call
+   * {@link Mocha#loadFiles} _or_ {@link Mocha#loadFilesAsync}.
+   * @private
+   * @memberof Mocha
+   */
+  this._lazyLoadFiles = false;
+
+  /**
+   * It's useful for a Mocha instance to know if it's running in a worker process.
+   * We could derive this via other means, but it's helpful to have a flag to refer to.
+   * @memberof Mocha
+   * @private
+   */
+  this.isWorker = Boolean(options.isWorker);
+
+  if (
+    options.parallel &&
+    (typeof options.jobs === 'undefined' || options.jobs > 1)
+  ) {
+    debug('attempting to enable parallel mode');
+    this.parallelMode(true);
   }
 }
 
@@ -1807,20 +1878,20 @@ Mocha.prototype.addFile = function(file) {
  * // Use XUnit reporter and direct its output to file
  * mocha.reporter('xunit', { output: '/path/to/testspec.xunit.xml' });
  */
-Mocha.prototype.reporter = function(reporter, reporterOptions) {
-  if (typeof reporter === 'function') {
-    this._reporter = reporter;
+Mocha.prototype.reporter = function(reporterName, reporterOptions) {
+  if (typeof reporterName === 'function') {
+    this._reporter = reporterName;
   } else {
-    reporter = reporter || 'spec';
-    var _reporter;
+    reporterName = reporterName || 'spec';
+    var reporter;
     // Try to load a built-in reporter.
-    if (builtinReporters[reporter]) {
-      _reporter = builtinReporters[reporter];
+    if (builtinReporters[reporterName]) {
+      reporter = builtinReporters[reporterName];
     }
     // Try to load reporters from process.cwd() and node_modules
-    if (!_reporter) {
+    if (!reporter) {
       try {
-        _reporter = require(reporter);
+        reporter = require(reporterName);
       } catch (err) {
         if (
           err.code === 'MODULE_NOT_FOUND' ||
@@ -1828,31 +1899,31 @@ Mocha.prototype.reporter = function(reporter, reporterOptions) {
         ) {
           // Try to load reporters from a path (absolute or relative)
           try {
-            _reporter = require(path.resolve(utils.cwd(), reporter));
+            reporter = require(path.resolve(utils.cwd(), reporterName));
           } catch (_err) {
             _err.code === 'MODULE_NOT_FOUND' ||
             _err.message.indexOf('Cannot find module') >= 0
-              ? utils.warn(sQuote(reporter) + ' reporter not found')
+              ? utils.warn(sQuote(reporterName) + ' reporter not found')
               : utils.warn(
-                  sQuote(reporter) +
+                  sQuote(reporterName) +
                     ' reporter blew up with error:\n' +
                     err.stack
                 );
           }
         } else {
           utils.warn(
-            sQuote(reporter) + ' reporter blew up with error:\n' + err.stack
+            sQuote(reporterName) + ' reporter blew up with error:\n' + err.stack
           );
         }
       }
     }
-    if (!_reporter) {
+    if (!reporter) {
       throw createInvalidReporterError(
-        'invalid reporter ' + sQuote(reporter),
-        reporter
+        'invalid reporter ' + sQuote(reporterName),
+        reporterName
       );
     }
-    this._reporter = _reporter;
+    this._reporter = reporter;
   }
   this.options.reporterOption = reporterOptions;
   // alias option name is used in public reporters xunit/tap/progress
@@ -1961,7 +2032,7 @@ Mocha.prototype.loadFiles = function(fn) {
 Mocha.prototype.loadFilesAsync = function() {
   var self = this;
   var suite = this.suite;
-  this.loadAsync = true;
+  this.lazyLoadFiles(true);
 
   if (!esmUtils) {
     return new Promise(function(resolve) {
@@ -2107,24 +2178,6 @@ Mocha.prototype.invert = function() {
 };
 
 /**
- * Enables or disables ignoring global leaks.
- *
- * @deprecated since v7.0.0
- * @public
- * @see {@link Mocha#checkLeaks}
- * @param {boolean} [ignoreLeaks=false] - Whether to ignore global leaks.
- * @return {Mocha} this
- * @chainable
- */
-Mocha.prototype.ignoreLeaks = function(ignoreLeaks) {
-  utils.deprecate(
-    '"ignoreLeaks()" is DEPRECATED, please use "checkLeaks()" instead.'
-  );
-  this.options.checkLeaks = !ignoreLeaks;
-  return this;
-};
-
-/**
  * Enables or disables checking for global variables leaked while running tests.
  *
  * @public
@@ -2195,7 +2248,7 @@ Mocha.prototype.fullTrace = function(fullTrace) {
 Mocha.prototype.growl = function() {
   this.options.growl = this.isGrowlCapable();
   if (!this.options.growl) {
-    var detail = process.browser
+    var detail = utils.isBrowser()
       ? 'notification support not available in this browser...'
       : 'notification support prerequisites not installed...';
     console.error(detail + ' cannot enable!');
@@ -2256,24 +2309,6 @@ Mocha.prototype.globals = Mocha.prototype.global;
 /**
  * Enables or disables TTY color output by screen-oriented reporters.
  *
- * @deprecated since v7.0.0
- * @public
- * @see {@link Mocha#color}
- * @param {boolean} colors - Whether to enable color output.
- * @return {Mocha} this
- * @chainable
- */
-Mocha.prototype.useColors = function(colors) {
-  utils.deprecate('"useColors()" is DEPRECATED, please use "color()" instead.');
-  if (colors !== undefined) {
-    this.options.color = colors;
-  }
-  return this;
-};
-
-/**
- * Enables or disables TTY color output by screen-oriented reporters.
- *
  * @public
  * @see [CLI option](../#-color-c-colors)
  * @param {boolean} [color=true] - Whether to enable color output.
@@ -2282,25 +2317,6 @@ Mocha.prototype.useColors = function(colors) {
  */
 Mocha.prototype.color = function(color) {
   this.options.color = color !== false;
-  return this;
-};
-
-/**
- * Determines if reporter should use inline diffs (rather than +/-)
- * in test failure output.
- *
- * @deprecated since v7.0.0
- * @public
- * @see {@link Mocha#inlineDiffs}
- * @param {boolean} [inlineDiffs=false] - Whether to use inline diffs.
- * @return {Mocha} this
- * @chainable
- */
-Mocha.prototype.useInlineDiffs = function(inlineDiffs) {
-  utils.deprecate(
-    '"useInlineDiffs()" is DEPRECATED, please use "inlineDiffs()" instead.'
-  );
-  this.options.inlineDiffs = inlineDiffs !== undefined && inlineDiffs;
   return this;
 };
 
@@ -2316,22 +2332,6 @@ Mocha.prototype.useInlineDiffs = function(inlineDiffs) {
  */
 Mocha.prototype.inlineDiffs = function(inlineDiffs) {
   this.options.inlineDiffs = inlineDiffs !== false;
-  return this;
-};
-
-/**
- * Determines if reporter should include diffs in test failure output.
- *
- * @deprecated since v7.0.0
- * @public
- * @see {@link Mocha#diff}
- * @param {boolean} [hideDiff=false] - Whether to hide diffs.
- * @return {Mocha} this
- * @chainable
- */
-Mocha.prototype.hideDiff = function(hideDiff) {
-  utils.deprecate('"hideDiff()" is DEPRECATED, please use "diff()" instead.');
-  this.options.diff = !(hideDiff === true);
   return this;
 };
 
@@ -2360,7 +2360,6 @@ Mocha.prototype.diff = function(diff) {
  * @public
  * @see [CLI option](../#-timeout-ms-t-ms)
  * @see [Timeouts](../#timeouts)
- * @see {@link Mocha#enableTimeouts}
  * @param {number|string} msecs - Timeout threshold value.
  * @return {Mocha} this
  * @chainable
@@ -2416,22 +2415,6 @@ Mocha.prototype.retries = function(n) {
  */
 Mocha.prototype.slow = function(msecs) {
   this.suite.slow(msecs);
-  return this;
-};
-
-/**
- * Enables or disables timeouts.
- *
- * @public
- * @see [CLI option](../#-timeout-ms-t-ms)
- * @param {boolean} enableTimeouts - Whether to enable timeouts.
- * @return {Mocha} this
- * @chainable
- */
-Mocha.prototype.enableTimeouts = function(enableTimeouts) {
-  this.suite.enableTimeouts(
-    arguments.length && enableTimeouts !== undefined ? enableTimeouts : true
-  );
   return this;
 };
 
@@ -2522,6 +2505,7 @@ Mocha.prototype.forbidPending = function(forbidPending) {
 
 /**
  * Throws an error if mocha is in the wrong state to be able to transition to a "running" state.
+ * @private
  */
 Mocha.prototype._guardRunningStateTransition = function() {
   if (this._state === mochaStates.RUNNING) {
@@ -2588,14 +2572,14 @@ Mocha.prototype.run = function(fn) {
     this._previousRunner.dispose();
     this.suite.reset();
   }
-  if (this.files.length && !this.loadAsync) {
+  if (this.files.length && !this._lazyLoadFiles) {
     this.loadFiles();
   }
   var self = this;
   var suite = this.suite;
   var options = this.options;
   options.files = this.files;
-  var runner = new exports.Runner(suite, {
+  var runner = new this._runnerClass(suite, {
     delay: options.delay,
     cleanReferencesAfterRun: this._cleanReferencesAfterRun
   });
@@ -2637,7 +2621,7 @@ Mocha.prototype.run = function(fn) {
     }
   }
 
-  return runner.run(done);
+  return runner.run(done, {files: this.files, options: options});
 };
 
 /**
@@ -2669,6 +2653,65 @@ Mocha.prototype.rootHooks = function rootHooks(hooks) {
 };
 
 /**
+ * Toggles parallel mode.
+ *
+ * Must be run before calling {@link Mocha#run}. Changes the `Runner` class to
+ * use; also enables lazy file loading if not already done so.
+ * @param {boolean} [enable] - If `true`, enable; otherwise disable.
+ * @throws If run in browser
+ * @throws If Mocha not in "INIT" state
+ * @returns {Mocha}
+ * @chainable
+ * @public
+ */
+Mocha.prototype.parallelMode = function parallelMode(enable) {
+  if (utils.isBrowser()) {
+    throw errors.createUnsupportedError(
+      'parallel mode is only supported in Node.js'
+    );
+  }
+  var parallel = enable === true;
+  if (
+    parallel === this.options.parallel &&
+    this._lazyLoadFiles &&
+    this._runnerClass !== exports.Runner
+  ) {
+    return this;
+  }
+  if (this._state !== mochaStates.INIT) {
+    throw errors.createUnsupportedError(
+      'cannot change parallel mode after having called run()'
+    );
+  }
+  this.options.parallel = parallel;
+
+  // swap Runner class
+  this._runnerClass = parallel
+    ? require('./nodejs/parallel-buffered-runner')
+    : exports.Runner;
+
+  // lazyLoadFiles may have been set `true` otherwise (for ESM loading),
+  // so keep `true` if so.
+  return this.lazyLoadFiles(this._lazyLoadFiles || parallel);
+};
+
+/**
+ * Disables implicit call to {@link Mocha#loadFiles} in {@link Mocha#run}. This
+ * setting is used by watch mode, parallel mode, and for loading ESM files.
+ * @todo This should throw if we've already loaded files; such behavior
+ * necessitates adding a new state.
+ * @param {boolean} [enable] - If `true`, disable eager loading of files in
+ * {@link Mocha#run}
+ * @chainable
+ * @public
+ */
+Mocha.prototype.lazyLoadFiles = function lazyLoadFiles(enable) {
+  this._lazyLoadFiles = enable === true;
+  debug('set lazy load to %s', enable);
+  return this;
+};
+
+/**
  * An alternative way to define root hooks that works with parallel runs.
  * @typedef {Object} MochaRootHookObject
  * @property {Function|Function[]} [beforeAll] - "Before all" hook(s)
@@ -2683,12 +2726,11 @@ Mocha.prototype.rootHooks = function rootHooks(hooks) {
  * @returns {MochaRootHookObject|Promise<MochaRootHookObject>}
  */
 
-}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"../package.json":90,"./context":5,"./errors":6,"./esm-utils":42,"./growl":2,"./hook":7,"./interfaces":11,"./mocharc.json":15,"./reporters":21,"./runnable":33,"./runner":34,"./stats-collector":35,"./suite":36,"./test":37,"./utils":38,"_process":69,"escape-string-regexp":49,"path":42}],15:[function(require,module,exports){
+}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"../package.json":89,"./context":5,"./errors":6,"./esm-utils":42,"./hook":7,"./interfaces":11,"./mocharc.json":15,"./nodejs/growl":2,"./nodejs/parallel-buffered-runner":40,"./reporters":21,"./runnable":33,"./runner":34,"./stats-collector":35,"./suite":36,"./test":37,"./utils":38,"debug":45,"escape-string-regexp":49,"path":42}],15:[function(require,module,exports){
 module.exports={
   "diff": true,
   "extension": ["js", "cjs", "mjs"],
-  "opts": "./test/mocha.opts",
   "package": "./package.json",
   "reporter": "spec",
   "slow": 75,
@@ -2725,7 +2767,7 @@ var tty = require('tty');
 var diff = require('diff');
 var milliseconds = require('ms');
 var utils = require('../utils');
-var supportsColor = process.browser ? null : require('supports-color');
+var supportsColor = utils.isBrowser() ? null : require('supports-color');
 var constants = require('../runner').constants;
 var EVENT_TEST_PASS = constants.EVENT_TEST_PASS;
 var EVENT_TEST_FAIL = constants.EVENT_TEST_FAIL;
@@ -2752,7 +2794,7 @@ var consoleLog = console.log;
  */
 
 exports.useColors =
-  !process.browser &&
+  !utils.isBrowser() &&
   (supportsColor.stdout || process.env.MOCHA_COLORS !== undefined);
 
 /**
@@ -3238,7 +3280,7 @@ Base.consoleLog = consoleLog;
 Base.abstract = true;
 
 }).call(this,require('_process'))
-},{"../runner":34,"../utils":38,"_process":69,"diff":48,"ms":60,"supports-color":42,"tty":4}],18:[function(require,module,exports){
+},{"../runner":34,"../utils":38,"_process":68,"diff":48,"ms":59,"supports-color":42,"tty":4}],18:[function(require,module,exports){
 'use strict';
 /**
  * @module Doc
@@ -3420,7 +3462,7 @@ inherits(Dot, Base);
 Dot.description = 'dot matrix representation';
 
 }).call(this,require('_process'))
-},{"../runner":34,"../utils":38,"./base":17,"_process":69}],20:[function(require,module,exports){
+},{"../runner":34,"../utils":38,"./base":17,"_process":68}],20:[function(require,module,exports){
 (function (global){
 'use strict';
 
@@ -3930,7 +3972,7 @@ function clean(test) {
 JSONStream.description = 'newline delimited JSON events';
 
 }).call(this,require('_process'))
-},{"../runner":34,"./base":17,"_process":69}],23:[function(require,module,exports){
+},{"../runner":34,"./base":17,"_process":68}],23:[function(require,module,exports){
 (function (process){
 'use strict';
 /**
@@ -4070,7 +4112,7 @@ function errorJSON(err) {
 JSONReporter.description = 'single JSON object';
 
 }).call(this,require('_process'))
-},{"../runner":34,"./base":17,"_process":69}],24:[function(require,module,exports){
+},{"../runner":34,"./base":17,"_process":68}],24:[function(require,module,exports){
 (function (process){
 'use strict';
 /**
@@ -4130,11 +4172,12 @@ function Landing(runner, options) {
 
   var self = this;
   var width = (Base.window.width * 0.75) | 0;
-  var total = runner.total;
   var stream = process.stdout;
+
   var plane = color('plane', '✈');
   var crashed = -1;
   var n = 0;
+  var total = 0;
 
   function runway() {
     var buf = Array(width).join('-');
@@ -4148,8 +4191,7 @@ function Landing(runner, options) {
 
   runner.on(EVENT_TEST_END, function(test) {
     // check if the plane crashed
-    var col = crashed === -1 ? ((width * ++n) / total) | 0 : crashed;
-
+    var col = crashed === -1 ? ((width * ++n) / ++total) | 0 : crashed;
     // show the crash
     if (test.state === STATE_FAILED) {
       plane = color('plane crash', '✈');
@@ -4190,7 +4232,7 @@ inherits(Landing, Base);
 Landing.description = 'Unicode landing strip';
 
 }).call(this,require('_process'))
-},{"../runnable":33,"../runner":34,"../utils":38,"./base":17,"_process":69}],25:[function(require,module,exports){
+},{"../runnable":33,"../runner":34,"../utils":38,"./base":17,"_process":68}],25:[function(require,module,exports){
 (function (process){
 'use strict';
 /**
@@ -4272,7 +4314,7 @@ inherits(List, Base);
 List.description = 'like "spec" reporter but flat';
 
 }).call(this,require('_process'))
-},{"../runner":34,"../utils":38,"./base":17,"_process":69}],26:[function(require,module,exports){
+},{"../runner":34,"../utils":38,"./base":17,"_process":68}],26:[function(require,module,exports){
 (function (process){
 'use strict';
 /**
@@ -4388,7 +4430,7 @@ function Markdown(runner, options) {
 Markdown.description = 'GitHub Flavored Markdown';
 
 }).call(this,require('_process'))
-},{"../runner":34,"../utils":38,"./base":17,"_process":69}],27:[function(require,module,exports){
+},{"../runner":34,"../utils":38,"./base":17,"_process":68}],27:[function(require,module,exports){
 (function (process){
 'use strict';
 /**
@@ -4444,7 +4486,7 @@ inherits(Min, Base);
 Min.description = 'essentially just a summary';
 
 }).call(this,require('_process'))
-},{"../runner":34,"../utils":38,"./base":17,"_process":69}],28:[function(require,module,exports){
+},{"../runner":34,"../utils":38,"./base":17,"_process":68}],28:[function(require,module,exports){
 (function (process){
 'use strict';
 /**
@@ -4724,7 +4766,7 @@ function write(string) {
 NyanCat.description = '"nyan cat"';
 
 }).call(this,require('_process'))
-},{"../runner":34,"../utils":38,"./base":17,"_process":69}],29:[function(require,module,exports){
+},{"../runner":34,"../utils":38,"./base":17,"_process":68}],29:[function(require,module,exports){
 (function (process){
 'use strict';
 /**
@@ -4832,7 +4874,7 @@ inherits(Progress, Base);
 Progress.description = 'a progress bar';
 
 }).call(this,require('_process'))
-},{"../runner":34,"../utils":38,"./base":17,"_process":69}],30:[function(require,module,exports){
+},{"../runner":34,"../utils":38,"./base":17,"_process":68}],30:[function(require,module,exports){
 'use strict';
 /**
  * @module Spec
@@ -4987,9 +5029,7 @@ function TAP(runner, options) {
   this._producer = createProducer(tapVersion);
 
   runner.once(EVENT_RUN_BEGIN, function() {
-    var ntests = runner.grepTotal(runner.suite);
     self._producer.writeVersion();
-    self._producer.writePlan(ntests);
   });
 
   runner.on(EVENT_TEST_END, function() {
@@ -5141,6 +5181,7 @@ TAPProducer.prototype.writeEpilogue = function(stats) {
   println('# pass ' + stats.passes);
   // :TBD: Why are we not showing pending results?
   println('# fail ' + stats.failures);
+  this.writePlan(stats.passes + stats.failures + stats.pending);
 };
 
 /**
@@ -5231,7 +5272,7 @@ inherits(TAP13Producer, TAPProducer);
 TAP.description = 'TAP-compatible output';
 
 }).call(this,require('_process'))
-},{"../runner":34,"../utils":38,"./base":17,"_process":69,"util":89}],32:[function(require,module,exports){
+},{"../runner":34,"../utils":38,"./base":17,"_process":68,"util":88}],32:[function(require,module,exports){
 (function (process,global){
 'use strict';
 /**
@@ -5244,7 +5285,6 @@ TAP.description = 'TAP-compatible output';
 var Base = require('./base');
 var utils = require('../utils');
 var fs = require('fs');
-var mkdirp = require('mkdirp');
 var path = require('path');
 var errors = require('../errors');
 var createUnsupportedError = errors.createUnsupportedError;
@@ -5297,7 +5337,9 @@ function XUnit(runner, options) {
         throw createUnsupportedError('file output not supported in browser');
       }
 
-      mkdirp.sync(path.dirname(options.reporterOptions.output));
+      fs.mkdirSync(path.dirname(options.reporterOptions.output), {
+        recursive: true
+      });
       self.fileStream = fs.createWriteStream(options.reporterOptions.output);
     }
 
@@ -5451,7 +5493,7 @@ function tag(name, attrs, close, content) {
 XUnit.description = 'XUnit-compatible XML output';
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"../errors":6,"../runnable":33,"../runner":34,"../utils":38,"./base":17,"_process":69,"fs":42,"mkdirp":59,"path":42}],33:[function(require,module,exports){
+},{"../errors":6,"../runnable":33,"../runner":34,"../utils":38,"./base":17,"_process":68,"fs":42,"path":42}],33:[function(require,module,exports){
 (function (global){
 'use strict';
 
@@ -5491,7 +5533,6 @@ function Runnable(title, fn) {
   this.sync = !this.async;
   this._timeout = 2000;
   this._slow = 75;
-  this._enableTimeouts = true;
   this._retries = -1;
   this.reset();
 }
@@ -5548,10 +5589,12 @@ Runnable.prototype.timeout = function(ms) {
 
   // see #1652 for reasoning
   if (ms === range[0] || ms === range[1]) {
-    this._enableTimeouts = false;
+    this._timeout = 0;
+  } else {
+    this._timeout = ms;
   }
-  debug('timeout %d', ms);
-  this._timeout = ms;
+  debug('timeout %d', this._timeout);
+
   if (this.timer) {
     this.resetTimeout();
   }
@@ -5574,22 +5617,6 @@ Runnable.prototype.slow = function(ms) {
   }
   debug('slow %d', ms);
   this._slow = ms;
-  return this;
-};
-
-/**
- * Set and get whether timeout is `enabled`.
- *
- * @private
- * @param {boolean} enabled
- * @return {Runnable|boolean} enabled or Runnable instance.
- */
-Runnable.prototype.enableTimeouts = function(enabled) {
-  if (!arguments.length) {
-    return this._enableTimeouts;
-  }
-  debug('enableTimeouts %s', enabled);
-  this._enableTimeouts = enabled;
   return this;
 };
 
@@ -5694,14 +5721,14 @@ Runnable.prototype.clearTimeout = function() {
  */
 Runnable.prototype.resetTimeout = function() {
   var self = this;
-  var ms = this.timeout() || 1e9;
+  var ms = this.timeout();
 
-  if (!this._enableTimeouts) {
+  if (ms === 0) {
     return;
   }
   this.clearTimeout();
   this.timer = setTimeout(function() {
-    if (!self._enableTimeouts) {
+    if (self.timeout() === 0) {
       return;
     }
     self.callback(self._timeoutError(ms));
@@ -5735,6 +5762,8 @@ Runnable.prototype.run = function(fn) {
   var finished;
   var errorWasHandled = false;
 
+  if (this.isPending()) return fn();
+
   // Sometimes the ctx exists, but it is not runnable
   if (ctx && ctx.runnable) {
     ctx.runnable(this);
@@ -5763,7 +5792,7 @@ Runnable.prototype.run = function(fn) {
     self.clearTimeout();
     self.duration = new Date() - start;
     finished = true;
-    if (!err && self.duration > ms && self._enableTimeouts) {
+    if (!err && self.duration > ms && ms > 0) {
       err = self._timeoutError(ms);
     }
     fn(err);
@@ -5810,11 +5839,7 @@ Runnable.prototype.run = function(fn) {
 
   // sync or promise-returning
   try {
-    if (this.isPending()) {
-      done();
-    } else {
-      callFn(this.fn);
-    }
+    callFn(this.fn);
   } catch (err) {
     errorWasHandled = true;
     if (err instanceof Pending) {
@@ -5915,7 +5940,11 @@ var constants = utils.defineConstants(
     /**
      * Value of `state` prop when a `Runnable` has passed
      */
-    STATE_PASSED: 'passed'
+    STATE_PASSED: 'passed',
+    /**
+     * Value of `state` prop when a `Runnable` has been skipped by user
+     */
+    STATE_PENDING: 'pending'
   }
 );
 
@@ -5938,7 +5967,7 @@ Runnable.toValueOrError = function(value) {
 Runnable.constants = constants;
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./errors":6,"./pending":16,"./utils":38,"debug":45,"events":50,"ms":60}],34:[function(require,module,exports){
+},{"./errors":6,"./pending":16,"./utils":38,"debug":45,"events":50,"ms":59}],34:[function(require,module,exports){
 (function (process,global){
 'use strict';
 
@@ -5960,6 +5989,7 @@ var HOOK_TYPE_BEFORE_ALL = Suite.constants.HOOK_TYPE_BEFORE_ALL;
 var EVENT_ROOT_SUITE_RUN = Suite.constants.EVENT_ROOT_SUITE_RUN;
 var STATE_FAILED = Runnable.constants.STATE_FAILED;
 var STATE_PASSED = Runnable.constants.STATE_PASSED;
+var STATE_PENDING = Runnable.constants.STATE_PENDING;
 var dQuote = utils.dQuote;
 var sQuote = utils.sQuote;
 var stackFilter = utils.stackTraceFilter();
@@ -6135,6 +6165,7 @@ inherits(Runner, EventEmitter);
  * @param {EventEmitter} target - The `EventEmitter`
  * @param {string} eventName - The event name
  * @param {string} fn - Listener function
+ * @private
  */
 Runner.prototype._addEventListener = function(target, eventName, listener) {
   target.on(eventName, listener);
@@ -6146,6 +6177,7 @@ Runner.prototype._addEventListener = function(target, eventName, listener) {
  * @param {EventEmitter} target - The `EventEmitter`
  * @param {string} eventName - The event anme
  * @param {function} listener - Listener function
+ * @private
  */
 Runner.prototype._removeEventListener = function(target, eventName, listener) {
   var eventListenerIndex = -1;
@@ -6298,11 +6330,13 @@ Runner.prototype.checkGlobals = function(test) {
  * Fail the given `test`.
  *
  * @private
- * @param {Test} test
+ * @param {Runnable} test
  * @param {Error} err
+ * @param {boolean} [force=false] - Whether to fail a pending test.
  */
-Runner.prototype.fail = function(test, err) {
-  if (test.isPending()) {
+Runner.prototype.fail = function(test, err, force) {
+  force = force === true;
+  if (test.isPending() && !force) {
     return;
   }
   if (this.state === constants.STATE_STOPPED) {
@@ -6409,7 +6443,7 @@ Runner.prototype.hook = function(name, fn) {
       });
     }
 
-    hook.run(function(err) {
+    hook.run(function cbHookRun(err) {
       var testError = hook.error();
       if (testError) {
         self.fail(self.test, testError);
@@ -6435,6 +6469,7 @@ Runner.prototype.hook = function(name, fn) {
           suite.suites.forEach(function(suite) {
             suite.pending = true;
           });
+          hooks = [];
         } else {
           hook.pending = false;
           var errForbid = createUnsupportedError('`this.skip` forbidden');
@@ -6649,10 +6684,9 @@ Runner.prototype.runTests = function(suite, fn) {
     // static skip, no hooks are executed
     if (test.isPending()) {
       if (self.forbidPending) {
-        test.isPending = alwaysFalse;
-        self.fail(test, new Error('Pending test forbidden'));
-        delete test.isPending;
+        self.fail(test, new Error('Pending test forbidden'), true);
       } else {
+        test.state = STATE_PENDING;
         self.emit(constants.EVENT_TEST_PENDING, test);
       }
       self.emit(constants.EVENT_TEST_END, test);
@@ -6665,10 +6699,9 @@ Runner.prototype.runTests = function(suite, fn) {
       // conditional skip within beforeEach
       if (test.isPending()) {
         if (self.forbidPending) {
-          test.isPending = alwaysFalse;
-          self.fail(test, new Error('Pending test forbidden'));
-          delete test.isPending;
+          self.fail(test, new Error('Pending test forbidden'), true);
         } else {
+          test.state = STATE_PENDING;
           self.emit(constants.EVENT_TEST_PENDING, test);
         }
         self.emit(constants.EVENT_TEST_END, test);
@@ -6689,10 +6722,9 @@ Runner.prototype.runTests = function(suite, fn) {
         // conditional skip within it
         if (test.pending) {
           if (self.forbidPending) {
-            test.isPending = alwaysFalse;
-            self.fail(test, new Error('Pending test forbidden'));
-            delete test.isPending;
+            self.fail(test, new Error('Pending test forbidden'), true);
           } else {
+            test.state = STATE_PENDING;
             self.emit(constants.EVENT_TEST_PENDING, test);
           }
           self.emit(constants.EVENT_TEST_END, test);
@@ -6728,10 +6760,6 @@ Runner.prototype.runTests = function(suite, fn) {
   this.hookErr = hookErr;
   next();
 };
-
-function alwaysFalse() {
-  return false;
-}
 
 /**
  * Run the given `suite` and invoke the callback `fn()` when complete.
@@ -6843,7 +6871,7 @@ Runner.prototype._uncaught = function(err) {
     return;
   }
   // browser does not exit script when throwing in global.onerror()
-  if (this.allowUncaught && !process.browser) {
+  if (this.allowUncaught && !utils.isBrowser()) {
     debug('uncaught(): bubbling exception due to --allow-uncaught');
     throw err;
   }
@@ -6899,9 +6927,7 @@ Runner.prototype._uncaught = function(err) {
   } else if (runnable.isPending()) {
     debug('uncaught(): pending Runnable wound up failing!');
     // report 'pending test' retrospectively as failed
-    runnable.isPending = alwaysFalse;
-    this.fail(runnable, err);
-    delete runnable.isPending;
+    this.fail(runnable, err, true);
     return;
   }
 
@@ -6923,10 +6949,11 @@ Runner.prototype._uncaught = function(err) {
  *
  * @public
  * @memberof Runner
- * @param {Function} fn
+ * @param {Function} fn - Callback when finished
+ * @param {{files: string[], options: Options}} [opts] - For subclasses
  * @return {Runner} Runner instance.
  */
-Runner.prototype.run = function(fn) {
+Runner.prototype.run = function(fn, opts) {
   var self = this;
   var rootSuite = this.suite;
 
@@ -7083,7 +7110,7 @@ Runner.constants = constants;
  */
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./errors":6,"./pending":16,"./runnable":33,"./suite":36,"./utils":38,"_process":69,"debug":45,"events":50,"util":89}],35:[function(require,module,exports){
+},{"./errors":6,"./pending":16,"./runnable":33,"./suite":36,"./utils":38,"_process":68,"debug":45,"events":50,"util":88}],35:[function(require,module,exports){
 (function (global){
 'use strict';
 
@@ -7242,7 +7269,6 @@ function Suite(title, parentContext, isRoot) {
   this._afterEach = [];
   this._afterAll = [];
   this._timeout = 2000;
-  this._enableTimeouts = true;
   this._slow = 75;
   this._bail = false;
   this._onlyTests = [];
@@ -7294,7 +7320,6 @@ Suite.prototype.clone = function() {
   suite.root = this.root;
   suite.timeout(this.timeout());
   suite.retries(this.retries());
-  suite.enableTimeouts(this.enableTimeouts());
   suite.slow(this.slow());
   suite.bail(this.bail());
   return suite;
@@ -7312,12 +7337,15 @@ Suite.prototype.timeout = function(ms) {
   if (!arguments.length) {
     return this._timeout;
   }
-  if (ms.toString() === '0') {
-    this._enableTimeouts = false;
-  }
   if (typeof ms === 'string') {
     ms = milliseconds(ms);
   }
+
+  // Clamp to range
+  var INT_MAX = Math.pow(2, 31) - 1;
+  var range = [0, INT_MAX];
+  ms = utils.clamp(ms, range);
+
   debug('timeout %d', ms);
   this._timeout = parseInt(ms, 10);
   return this;
@@ -7336,22 +7364,6 @@ Suite.prototype.retries = function(n) {
   }
   debug('retries %d', n);
   this._retries = parseInt(n, 10) || 0;
-  return this;
-};
-
-/**
- * Set or get timeout to `enabled`.
- *
- * @private
- * @param {boolean} enabled
- * @return {Suite|boolean} self or enabled
- */
-Suite.prototype.enableTimeouts = function(enabled) {
-  if (!arguments.length) {
-    return this._enableTimeouts;
-  }
-  debug('enableTimeouts %s', enabled);
-  this._enableTimeouts = enabled;
   return this;
 };
 
@@ -7411,7 +7423,6 @@ Suite.prototype._createHook = function(title, fn) {
   hook.parent = this;
   hook.timeout(this.timeout());
   hook.retries(this.retries());
-  hook.enableTimeouts(this.enableTimeouts());
   hook.slow(this.slow());
   hook.ctx = this.ctx;
   hook.file = this.file;
@@ -7526,7 +7537,6 @@ Suite.prototype.addSuite = function(suite) {
   suite.root = false;
   suite.timeout(this.timeout());
   suite.retries(this.retries());
-  suite.enableTimeouts(this.enableTimeouts());
   suite.slow(this.slow());
   suite.bail(this.bail());
   this.suites.push(suite);
@@ -7545,7 +7555,6 @@ Suite.prototype.addTest = function(test) {
   test.parent = this;
   test.timeout(this.timeout());
   test.retries(this.retries());
-  test.enableTimeouts(this.enableTimeouts());
   test.slow(this.slow());
   test.ctx = this.ctx;
   this.tests.push(test);
@@ -7683,6 +7692,15 @@ Suite.prototype.appendOnlySuite = function(suite) {
 };
 
 /**
+ * Marks a suite to be `only`.
+ *
+ * @private
+ */
+Suite.prototype.markOnly = function() {
+  this.parent && this.parent.appendOnlySuite(this);
+};
+
+/**
  * Adds a test to the list of tests marked `only`.
  *
  * @private
@@ -7746,6 +7764,22 @@ Suite.prototype.cleanReferences = function cleanReferences() {
   for (var i = 0; i < this.tests.length; i++) {
     delete this.tests[i].fn;
   }
+};
+
+/**
+ * Returns an object suitable for IPC.
+ * Functions are represented by keys beginning with `$$`.
+ * @private
+ * @returns {Object}
+ */
+Suite.prototype.serialize = function serialize() {
+  return {
+    _bail: this._bail,
+    $$fullTitle: this.fullTitle(),
+    $$isPending: this.isPending(),
+    root: this.root,
+    title: this.title
+  };
 };
 
 var constants = utils.defineConstants(
@@ -7840,7 +7874,7 @@ var deprecatedEvents = Object.keys(constants)
 
 Suite.constants = constants;
 
-},{"./errors":6,"./hook":7,"./utils":38,"debug":45,"events":50,"ms":60}],37:[function(require,module,exports){
+},{"./errors":6,"./hook":7,"./utils":38,"debug":45,"events":50,"ms":59}],37:[function(require,module,exports){
 'use strict';
 var Runnable = require('./runnable');
 var utils = require('./utils');
@@ -7913,7 +7947,6 @@ Test.prototype.clone = function() {
   var test = new Test(this.title, this.fn);
   test.timeout(this.timeout());
   test.slow(this.slow());
-  test.enableTimeouts(this.enableTimeouts());
   test.retries(this.retries());
   test.currentRetry(this.currentRetry());
   test.retriedTest(this.retriedTest() || this);
@@ -7922,6 +7955,34 @@ Test.prototype.clone = function() {
   test.file = this.file;
   test.ctx = this.ctx;
   return test;
+};
+
+/**
+ * Returns an minimal object suitable for transmission over IPC.
+ * Functions are represented by keys beginning with `$$`.
+ * @private
+ * @returns {Object}
+ */
+Test.prototype.serialize = function serialize() {
+  return {
+    $$currentRetry: this._currentRetry,
+    $$fullTitle: this.fullTitle(),
+    $$isPending: this.pending,
+    $$retriedTest: this._retriedTest || null,
+    $$slow: this._slow,
+    $$titlePath: this.titlePath(),
+    body: this.body,
+    duration: this.duration,
+    err: this.err,
+    parent: {
+      $$fullTitle: this.parent.fullTitle()
+    },
+    speed: this.speed,
+    state: this.state,
+    title: this.title,
+    type: this.type,
+    file: this.file
+  };
 };
 
 },{"./errors":6,"./runnable":33,"./utils":38}],38:[function(require,module,exports){
@@ -8416,7 +8477,6 @@ function isHiddenOnUnix(pathname) {
  * **Make no assumption that the names will be sorted in any fashion.**
  *
  * @public
- * @memberof Mocha.utils
  * @param {string} filepath - Base path to start searching from.
  * @param {string[]} [extensions=[]] - File extensions to look for.
  * @param {boolean} [recursive=false] - Whether to recurse into subdirectories.
@@ -8737,16 +8797,20 @@ exports.defineConstants = function(obj) {
  * This function returns whether Node.JS has ES Module supports that is compatible with Mocha's needs,
  * which is version >=12.11.
  *
+ * @param {partialSupport} whether the full Node.js ESM support is available (>= 12) or just something that supports the runtime (>= 10)
+ *
  * @returns {Boolean} whether the current version of Node.JS supports ES Modules in a way that is compatible with Mocha
  */
-exports.supportsEsModules = function() {
-  if (!process.browser && process.versions && process.versions.node) {
+exports.supportsEsModules = function(partialSupport) {
+  if (!exports.isBrowser() && process.versions && process.versions.node) {
     var versionFields = process.versions.node.split('.');
     var major = +versionFields[0];
     var minor = +versionFields[1];
 
-    if (major >= 13 || (major === 12 && minor >= 11)) {
-      return true;
+    if (!partialSupport) {
+      return major >= 13 || (major === 12 && minor >= 11);
+    } else {
+      return major >= 10;
     }
   }
 };
@@ -8761,8 +8825,18 @@ exports.cwd = function cwd() {
   return process.cwd();
 };
 
+/**
+ * Returns `true` if Mocha is running in a browser.
+ * Checks for `process.browser`.
+ * @returns {boolean}
+ * @private
+ */
+exports.isBrowser = function isBrowser() {
+  return Boolean(process.browser);
+};
+
 }).call(this,require('_process'),require("buffer").Buffer)
-},{"./errors":6,"_process":69,"buffer":43,"fs":42,"glob":42,"he":54,"object.assign":65,"path":42,"util":89}],39:[function(require,module,exports){
+},{"./errors":6,"_process":68,"buffer":43,"fs":42,"glob":42,"he":54,"object.assign":64,"path":42,"util":88}],39:[function(require,module,exports){
 'use strict'
 
 exports.byteLength = byteLength
@@ -8946,7 +9020,7 @@ BrowserStdout.prototype._write = function(chunks, encoding, cb) {
 }
 
 }).call(this,require('_process'))
-},{"_process":69,"stream":84,"util":89}],42:[function(require,module,exports){
+},{"_process":68,"stream":83,"util":88}],42:[function(require,module,exports){
 arguments[4][40][0].apply(exports,arguments)
 },{"dup":40}],43:[function(require,module,exports){
 (function (Buffer){
@@ -11024,7 +11098,7 @@ formatters.j = function (v) {
 
 
 }).call(this,require('_process'))
-},{"./common":46,"_process":69}],46:[function(require,module,exports){
+},{"./common":46,"_process":68}],46:[function(require,module,exports){
 "use strict";
 
 /**
@@ -11275,7 +11349,7 @@ function setup(env) {
 module.exports = setup;
 
 
-},{"ms":60}],47:[function(require,module,exports){
+},{"ms":59}],47:[function(require,module,exports){
 'use strict';
 
 var keys = require('object-keys');
@@ -11335,7 +11409,7 @@ defineProperties.supportsDescriptors = !!supportsDescriptors;
 
 module.exports = defineProperties;
 
-},{"object-keys":62}],48:[function(require,module,exports){
+},{"object-keys":61}],48:[function(require,module,exports){
 /*!
 
  diff v3.5.0
@@ -14311,107 +14385,6 @@ module.exports = Array.isArray || function (arr) {
 };
 
 },{}],59:[function(require,module,exports){
-var path = require('path');
-var fs = require('fs');
-var _0777 = parseInt('0777', 8);
-
-module.exports = mkdirP.mkdirp = mkdirP.mkdirP = mkdirP;
-
-function mkdirP (p, opts, f, made) {
-    if (typeof opts === 'function') {
-        f = opts;
-        opts = {};
-    }
-    else if (!opts || typeof opts !== 'object') {
-        opts = { mode: opts };
-    }
-    
-    var mode = opts.mode;
-    var xfs = opts.fs || fs;
-    
-    if (mode === undefined) {
-        mode = _0777
-    }
-    if (!made) made = null;
-    
-    var cb = f || function () {};
-    p = path.resolve(p);
-    
-    xfs.mkdir(p, mode, function (er) {
-        if (!er) {
-            made = made || p;
-            return cb(null, made);
-        }
-        switch (er.code) {
-            case 'ENOENT':
-                if (path.dirname(p) === p) return cb(er);
-                mkdirP(path.dirname(p), opts, function (er, made) {
-                    if (er) cb(er, made);
-                    else mkdirP(p, opts, cb, made);
-                });
-                break;
-
-            // In the case of any other error, just see if there's a dir
-            // there already.  If so, then hooray!  If not, then something
-            // is borked.
-            default:
-                xfs.stat(p, function (er2, stat) {
-                    // if the stat fails, then that's super weird.
-                    // let the original error be the failure reason.
-                    if (er2 || !stat.isDirectory()) cb(er, made)
-                    else cb(null, made);
-                });
-                break;
-        }
-    });
-}
-
-mkdirP.sync = function sync (p, opts, made) {
-    if (!opts || typeof opts !== 'object') {
-        opts = { mode: opts };
-    }
-    
-    var mode = opts.mode;
-    var xfs = opts.fs || fs;
-    
-    if (mode === undefined) {
-        mode = _0777
-    }
-    if (!made) made = null;
-
-    p = path.resolve(p);
-
-    try {
-        xfs.mkdirSync(p, mode);
-        made = made || p;
-    }
-    catch (err0) {
-        switch (err0.code) {
-            case 'ENOENT' :
-                made = sync(path.dirname(p), opts, made);
-                sync(p, opts, made);
-                break;
-
-            // In the case of any other error, just see if there's a dir
-            // there already.  If so, then hooray!  If not, then something
-            // is borked.
-            default:
-                var stat;
-                try {
-                    stat = xfs.statSync(p);
-                }
-                catch (err1) {
-                    throw err0;
-                }
-                if (!stat.isDirectory()) throw err0;
-                break;
-        }
-    }
-
-    return made;
-};
-
-},{"fs":42,"path":42}],60:[function(require,module,exports){
 /**
  * Helpers.
  */
@@ -14575,7 +14548,7 @@ function plural(ms, msAbs, n, name) {
   return Math.round(ms / n) + ' ' + name + (isPlural ? 's' : '');
 }
 
-},{}],61:[function(require,module,exports){
+},{}],60:[function(require,module,exports){
 'use strict';
 
 var keysShim;
@@ -14697,7 +14670,7 @@ if (!Object.keys) {
 }
 module.exports = keysShim;
 
-},{"./isArguments":63}],62:[function(require,module,exports){
+},{"./isArguments":62}],61:[function(require,module,exports){
 'use strict';
 
 var slice = Array.prototype.slice;
@@ -14731,7 +14704,7 @@ keysShim.shim = function shimObjectKeys() {
 
 module.exports = keysShim;
 
-},{"./implementation":61,"./isArguments":63}],63:[function(require,module,exports){
+},{"./implementation":60,"./isArguments":62}],62:[function(require,module,exports){
 'use strict';
 
 var toStr = Object.prototype.toString;
@@ -14750,7 +14723,7 @@ module.exports = function isArguments(value) {
 	return isArgs;
 };
 
-},{}],64:[function(require,module,exports){
+},{}],63:[function(require,module,exports){
 'use strict';
 
 // modified from https://github.com/es-shims/es6-shim
@@ -14793,7 +14766,7 @@ module.exports = function assign(target, source1) {
 	return objTarget;
 };
 
-},{"function-bind":52,"has-symbols/shams":53,"object-keys":62}],65:[function(require,module,exports){
+},{"function-bind":52,"has-symbols/shams":53,"object-keys":61}],64:[function(require,module,exports){
 'use strict';
 
 var defineProperties = require('define-properties');
@@ -14812,7 +14785,7 @@ defineProperties(polyfill, {
 
 module.exports = polyfill;
 
-},{"./implementation":64,"./polyfill":66,"./shim":67,"define-properties":47}],66:[function(require,module,exports){
+},{"./implementation":63,"./polyfill":65,"./shim":66,"define-properties":47}],65:[function(require,module,exports){
 'use strict';
 
 var implementation = require('./implementation');
@@ -14865,7 +14838,7 @@ module.exports = function getPolyfill() {
 	return Object.assign;
 };
 
-},{"./implementation":64}],67:[function(require,module,exports){
+},{"./implementation":63}],66:[function(require,module,exports){
 'use strict';
 
 var define = require('define-properties');
@@ -14881,7 +14854,7 @@ module.exports = function shimAssign() {
 	return polyfill;
 };
 
-},{"./polyfill":66,"define-properties":47}],68:[function(require,module,exports){
+},{"./polyfill":65,"define-properties":47}],67:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -14929,7 +14902,7 @@ function nextTick(fn, arg1, arg2, arg3) {
 
 
 }).call(this,require('_process'))
-},{"_process":69}],69:[function(require,module,exports){
+},{"_process":68}],68:[function(require,module,exports){
 // shim for using process in browser
 var process = module.exports = {};
 
@@ -15115,10 +15088,10 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],70:[function(require,module,exports){
+},{}],69:[function(require,module,exports){
 module.exports = require('./lib/_stream_duplex.js');
 
-},{"./lib/_stream_duplex.js":71}],71:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":70}],70:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -15250,7 +15223,7 @@ Duplex.prototype._destroy = function (err, cb) {
 
   pna.nextTick(cb, err);
 };
-},{"./_stream_readable":73,"./_stream_writable":75,"core-util-is":44,"inherits":56,"process-nextick-args":68}],72:[function(require,module,exports){
+},{"./_stream_readable":72,"./_stream_writable":74,"core-util-is":44,"inherits":56,"process-nextick-args":67}],71:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -15298,7 +15271,7 @@ function PassThrough(options) {
 PassThrough.prototype._transform = function (chunk, encoding, cb) {
   cb(null, chunk);
 };
-},{"./_stream_transform":74,"core-util-is":44,"inherits":56}],73:[function(require,module,exports){
+},{"./_stream_transform":73,"core-util-is":44,"inherits":56}],72:[function(require,module,exports){
 (function (process,global){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -16320,7 +16293,7 @@ function indexOf(xs, x) {
   return -1;
 }
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./_stream_duplex":71,"./internal/streams/BufferList":76,"./internal/streams/destroy":77,"./internal/streams/stream":78,"_process":69,"core-util-is":44,"events":50,"inherits":56,"isarray":58,"process-nextick-args":68,"safe-buffer":83,"string_decoder/":85,"util":40}],74:[function(require,module,exports){
+},{"./_stream_duplex":70,"./internal/streams/BufferList":75,"./internal/streams/destroy":76,"./internal/streams/stream":77,"_process":68,"core-util-is":44,"events":50,"inherits":56,"isarray":58,"process-nextick-args":67,"safe-buffer":82,"string_decoder/":84,"util":40}],73:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -16535,7 +16508,7 @@ function done(stream, er, data) {
 
   return stream.push(null);
 }
-},{"./_stream_duplex":71,"core-util-is":44,"inherits":56}],75:[function(require,module,exports){
+},{"./_stream_duplex":70,"core-util-is":44,"inherits":56}],74:[function(require,module,exports){
 (function (process,global,setImmediate){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -17225,7 +17198,7 @@ Writable.prototype._destroy = function (err, cb) {
   cb(err);
 };
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("timers").setImmediate)
-},{"./_stream_duplex":71,"./internal/streams/destroy":77,"./internal/streams/stream":78,"_process":69,"core-util-is":44,"inherits":56,"process-nextick-args":68,"safe-buffer":83,"timers":86,"util-deprecate":87}],76:[function(require,module,exports){
+},{"./_stream_duplex":70,"./internal/streams/destroy":76,"./internal/streams/stream":77,"_process":68,"core-util-is":44,"inherits":56,"process-nextick-args":67,"safe-buffer":82,"timers":85,"util-deprecate":86}],75:[function(require,module,exports){
 'use strict';
 
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
@@ -17305,7 +17278,7 @@ if (util && util.inspect && util.inspect.custom) {
     return this.constructor.name + ' ' + obj;
   };
 }
-},{"safe-buffer":83,"util":40}],77:[function(require,module,exports){
+},{"safe-buffer":82,"util":40}],76:[function(require,module,exports){
 'use strict';
 
 /*<replacement>*/
@@ -17380,13 +17353,13 @@ module.exports = {
   destroy: destroy,
   undestroy: undestroy
 };
-},{"process-nextick-args":68}],78:[function(require,module,exports){
+},{"process-nextick-args":67}],77:[function(require,module,exports){
 module.exports = require('events').EventEmitter;
 
-},{"events":50}],79:[function(require,module,exports){
+},{"events":50}],78:[function(require,module,exports){
 module.exports = require('./readable').PassThrough
 
-},{"./readable":80}],80:[function(require,module,exports){
+},{"./readable":79}],79:[function(require,module,exports){
 exports = module.exports = require('./lib/_stream_readable.js');
 exports.Stream = exports;
 exports.Readable = exports;
@@ -17395,13 +17368,13 @@ exports.Duplex = require('./lib/_stream_duplex.js');
 exports.Transform = require('./lib/_stream_transform.js');
 exports.PassThrough = require('./lib/_stream_passthrough.js');
 
-},{"./lib/_stream_duplex.js":71,"./lib/_stream_passthrough.js":72,"./lib/_stream_readable.js":73,"./lib/_stream_transform.js":74,"./lib/_stream_writable.js":75}],81:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":70,"./lib/_stream_passthrough.js":71,"./lib/_stream_readable.js":72,"./lib/_stream_transform.js":73,"./lib/_stream_writable.js":74}],80:[function(require,module,exports){
 module.exports = require('./readable').Transform
 
-},{"./readable":80}],82:[function(require,module,exports){
+},{"./readable":79}],81:[function(require,module,exports){
 module.exports = require('./lib/_stream_writable.js');
 
-},{"./lib/_stream_writable.js":75}],83:[function(require,module,exports){
+},{"./lib/_stream_writable.js":74}],82:[function(require,module,exports){
 /* eslint-disable node/no-deprecated-api */
 var buffer = require('buffer')
 var Buffer = buffer.Buffer
@@ -17465,7 +17438,7 @@ SafeBuffer.allocUnsafeSlow = function (size) {
   return buffer.SlowBuffer(size)
 }
 
-},{"buffer":43}],84:[function(require,module,exports){
+},{"buffer":43}],83:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -17594,7 +17567,7 @@ Stream.prototype.pipe = function(dest, options) {
   return dest;
 };
 
-},{"events":50,"inherits":56,"readable-stream/duplex.js":70,"readable-stream/passthrough.js":79,"readable-stream/readable.js":80,"readable-stream/transform.js":81,"readable-stream/writable.js":82}],85:[function(require,module,exports){
+},{"events":50,"inherits":56,"readable-stream/duplex.js":69,"readable-stream/passthrough.js":78,"readable-stream/readable.js":79,"readable-stream/transform.js":80,"readable-stream/writable.js":81}],84:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -17891,7 +17864,7 @@ function simpleWrite(buf) {
 function simpleEnd(buf) {
   return buf && buf.length ? this.write(buf) : '';
 }
-},{"safe-buffer":83}],86:[function(require,module,exports){
+},{"safe-buffer":82}],85:[function(require,module,exports){
 (function (setImmediate,clearImmediate){
 var nextTick = require('process/browser.js').nextTick;
 var apply = Function.prototype.apply;
@@ -17970,7 +17943,7 @@ exports.clearImmediate = typeof clearImmediate === "function" ? clearImmediate :
   delete immediateIds[id];
 };
 }).call(this,require("timers").setImmediate,require("timers").clearImmediate)
-},{"process/browser.js":69,"timers":86}],87:[function(require,module,exports){
+},{"process/browser.js":68,"timers":85}],86:[function(require,module,exports){
 (function (global){
 
 /**
@@ -18041,14 +18014,14 @@ function config (name) {
 }
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],88:[function(require,module,exports){
+},{}],87:[function(require,module,exports){
 module.exports = function isBuffer(arg) {
   return arg && typeof arg === 'object'
     && typeof arg.copy === 'function'
     && typeof arg.fill === 'function'
     && typeof arg.readUInt8 === 'function';
 }
-},{}],89:[function(require,module,exports){
+},{}],88:[function(require,module,exports){
 (function (process,global){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -18638,10 +18611,10 @@ function hasOwnProperty(obj, prop) {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./support/isBuffer":88,"_process":69,"inherits":56}],90:[function(require,module,exports){
+},{"./support/isBuffer":87,"_process":68,"inherits":56}],89:[function(require,module,exports){
 module.exports={
   "name": "mocha",
-  "version": "7.2.0",
+  "version": "8.0.1",
   "homepage": "https://mochajs.org/",
   "notifyLogo": "https://ibin.co/4QuRuGjXvl36.png"
 }
