@@ -1,4 +1,4 @@
-xdescribe("enter keystroke", function(){
+describe("enter keystroke", function(){
   //create a new pad before each test run
   beforeEach(function(cb){
     helper.newPad(cb);
