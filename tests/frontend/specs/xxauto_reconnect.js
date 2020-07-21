@@ -55,11 +55,11 @@ describe('Automatic pad reload on Force Reconnect message', function() {
   context('and user does not click on Cancel until timer expires', function() {
     var padWasReloaded = false;
 
-    beforeEach(function(done) {
+    beforeEach(function() {
+      this.timeout(5000);
       $originalPadFrame.one('load', function() {
         padWasReloaded = true;
       });
-      done();
     });
 
     it('reloads the pad', function(done) {
