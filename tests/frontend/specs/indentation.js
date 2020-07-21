@@ -1,4 +1,4 @@
-xdescribe("indentation button", function(){
+describe("indentation button", function(){
   //create a new pad before each test run
   beforeEach(function(cb){
     helper.newPad(cb);
