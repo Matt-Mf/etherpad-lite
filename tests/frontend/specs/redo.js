@@ -1,4 +1,4 @@
-xdescribe("undo button then redo button", function(){
+describe("undo button then redo button", function(){
   beforeEach(function(cb){
     helper.newPad(cb); // creates a new pad
     this.timeout(60000);

@@ -2,7 +2,7 @@ function deletecookie(name) {
     document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:01 GMT;';
 }
 
-xdescribe("Language select and change", function(){
+describe("Language select and change", function(){
   // Destroy language cookies
   deletecookie("language", null);
 

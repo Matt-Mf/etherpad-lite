@@ -1,4 +1,4 @@
-xdescribe('Automatic pad reload on Force Reconnect message', function() {
+describe('Automatic pad reload on Force Reconnect message', function() {
   var padId, $originalPadFrame;
 
   beforeEach(function(done) {

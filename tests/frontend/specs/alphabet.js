@@ -1,4 +1,4 @@
-xdescribe("All the alphabet works n stuff", function(){
+describe("All the alphabet works n stuff", function(){
   var expectedString = "abcdefghijklmnopqrstuvwxyz";
 
   //create a new pad before each test run

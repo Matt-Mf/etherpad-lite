@@ -1,4 +1,4 @@
-xdescribe("import functionality", function(){
+describe("import functionality", function(){
   beforeEach(function(cb){
     helper.newPad(cb); // creates a new pad
     this.timeout(60000);
