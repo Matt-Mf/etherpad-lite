@@ -104,6 +104,7 @@ var sauceTestWorker = async.queue(function (testSettings, callback) {
 //});
 //
 //// 4) Safari on OSX 10.14
+
 sauceTestWorker.push({
     'platform'       : 'OS X 10.14'
   , 'browserName'    : 'safari'
