@@ -6,6 +6,7 @@ var apiHandler = require('../../handler/APIHandler');
 exports.expressCreateServer = function (hook_name, args, cb) {
   //The Etherpad client side sends information about how a disconnect happened
   args.app.post('/ep/pad/connection-diagnostic-info', function(req, res) {
+    console.warn("connection-diagnostic-info:",req)
     new formidable.IncomingForm().parse(req, function(err, fields, files) {
       clientLogger.info("DIAGNOSTIC-INFO: " + fields.diagnosticInfo);
       res.end("OK");
@@ -14,6 +15,7 @@ exports.expressCreateServer = function (hook_name, args, cb) {
 
   //The Etherpad client side sends information about client side javscript errors
   args.app.post('/jserror', function(req, res) {
+    console.warn("/jserror:",req)
     new formidable.IncomingForm().parse(req, function(err, fields, files) {
       try {
         console.warn("jserror received from client");
