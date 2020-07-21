@@ -1,5 +1,5 @@
 // WARNING: drag and drop is only simulated on these tests, so manual testing might also be necessary
-describe('drag and drop', function() {
+xdescribe('drag and drop', function() {
   before(function(done) {
     helper.newPad(function() {
       createScriptWithSeveralLines(done);
