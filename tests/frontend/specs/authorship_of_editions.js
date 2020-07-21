@@ -1,4 +1,4 @@
-xdescribe('author of pad edition', function() {
+describe('author of pad edition', function() {
   var REGULAR_LINE = 0;
   var LINE_WITH_ORDERED_LIST = 1;
   var LINE_WITH_UNORDERED_LIST = 2;

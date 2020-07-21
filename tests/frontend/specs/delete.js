@@ -1,4 +1,4 @@
-xdescribe("delete keystroke", function(){
+describe("delete keystroke", function(){
   //create a new pad before each test run
   beforeEach(function(cb){
     helper.newPad(cb);
