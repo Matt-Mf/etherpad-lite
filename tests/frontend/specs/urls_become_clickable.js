@@ -1,4 +1,4 @@
-xdescribe("urls", function(){
+describe("urls", function(){
   //create a new pad before each test run
   beforeEach(function(cb){
     helper.newPad(cb);

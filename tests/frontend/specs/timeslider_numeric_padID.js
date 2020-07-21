@@ -1,4 +1,4 @@
-xdescribe("timeslider", function(){
+describe("timeslider", function(){
   var padId = 735773577357+(Math.round(Math.random()*1000));
 
   //create a new pad before each test run
