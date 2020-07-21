@@ -16,6 +16,9 @@ exports.expressCreateServer = function (hook_name, args, cb) {
   args.app.post('/jserror', function(req, res) {
     new formidable.IncomingForm().parse(req, function(err, fields, files) {
       try {
+        console.warn("jserror received from client");
+        console.warn("err:",err)
+        console.warn("fields:",fields)
         var data = JSON.parse(fields.errorInfo)
       }catch(e){
         return res.end()
