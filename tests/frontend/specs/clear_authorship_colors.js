@@ -1,4 +1,4 @@
-xdescribe("clear authorship colors button", function(){
+describe("clear authorship colors button", function(){
   //create a new pad before each test run
   beforeEach(function(cb){
     helper.newPad(cb);
