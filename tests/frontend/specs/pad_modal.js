@@ -24,8 +24,9 @@ describe('Pad modal', function() {
     });
 
     context('and user clicks on editor', function() {
-      beforeEach(function() {
+      beforeEach(function(done) {
         clickOnPadInner();
+        done();
       });
 
       it('does not close the modal', function(done) {
@@ -39,8 +40,9 @@ describe('Pad modal', function() {
     });
 
     context('and user clicks on pad outer', function() {
-      beforeEach(function() {
+      beforeEach(function(done) {
         clickOnPadOuter();
+        done();
       });
 
       it('does not close the modal', function(done) {
@@ -73,8 +75,9 @@ describe('Pad modal', function() {
     });
 */
     context('and user clicks on editor', function() {
-      beforeEach(function() {
+      beforeEach(function(done) {
         clickOnPadInner();
+        done();
       });
 
       it('closes the modal', function(done) {
@@ -84,8 +87,9 @@ describe('Pad modal', function() {
     });
 
     context('and user clicks on pad outer', function() {
-      beforeEach(function() {
+      beforeEach(function(done) {
         clickOnPadOuter();
+        done();
       });
 
       it('closes the modal', function(done) {

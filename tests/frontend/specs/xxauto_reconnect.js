@@ -34,9 +34,10 @@ describe('Automatic pad reload on Force Reconnect message', function() {
   });
 
   context('and user clicks on Cancel', function() {
-    beforeEach(function() {
+    beforeEach(function(done) {
       var $errorMessageModal = helper.padChrome$('#connectivity .userdup');
       $errorMessageModal.find('#cancelreconnect').click();
+      done();
     });
 
     it('does not show Cancel button nor timer anymore', function(done) {
@@ -54,9 +55,10 @@ describe('Automatic pad reload on Force Reconnect message', function() {
   context('and user does not click on Cancel until timer expires', function() {
     var padWasReloaded = false;
 
-    beforeEach(function() {
+    beforeEach(function(done) {
       $originalPadFrame.one('load', function() {
         padWasReloaded = true;
+        done();
       });
     });
 

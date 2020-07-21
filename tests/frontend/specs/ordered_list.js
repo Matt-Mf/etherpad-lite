@@ -19,9 +19,10 @@ describe("assign ordered list", function(){
 
   context('when user presses Ctrl+Shift+N', function() {
     context('and pad shortcut is enabled', function() {
-      beforeEach(function() {
+      beforeEach(function(done) {
         makeSureShortcutIsEnabled('cmdShiftN');
         triggerCtrlShiftShortcut('N');
+        done();
       });
 
       it('inserts unordered list', function(done) {
@@ -32,9 +33,10 @@ describe("assign ordered list", function(){
     });
 
     context('and pad shortcut is disabled', function() {
-      beforeEach(function() {
+      beforeEach(function(done) {
         makeSureShortcutIsDisabled('cmdShiftN');
         triggerCtrlShiftShortcut('N');
+        done();
       });
 
       it('does not insert unordered list', function(done) {
@@ -51,9 +53,10 @@ describe("assign ordered list", function(){
 
   context('when user presses Ctrl+Shift+1', function() {
     context('and pad shortcut is enabled', function() {
-      beforeEach(function() {
+      beforeEach(function(done) {
         makeSureShortcutIsEnabled('cmdShift1');
         triggerCtrlShiftShortcut('1');
+        done();
       });
 
       it('inserts unordered list', function(done) {
@@ -64,9 +67,10 @@ describe("assign ordered list", function(){
     });
 
     context('and pad shortcut is disabled', function() {
-      beforeEach(function() {
+      beforeEach(function(done) {
         makeSureShortcutIsDisabled('cmdShift1');
         triggerCtrlShiftShortcut('1');
+        done();
       });
 
       it('does not insert unordered list', function(done) {
