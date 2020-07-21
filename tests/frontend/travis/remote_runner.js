@@ -83,11 +83,11 @@ var sauceTestWorker = async.queue(function (testSettings, callback) {
 }, 6); //run 6 tests in parrallel
 
 // 1) Firefox on Linux
-sauceTestWorker.push({
-    'platform'       : 'Windows 7'
-  , 'browserName'    : 'firefox'
-  , 'version'        : '52.0'
-});
+//sauceTestWorker.push({
+//    'platform'       : 'Windows 7'
+//  , 'browserName'    : 'firefox'
+//  , 'version'        : '52.0'
+//});
 
 // 2) Chrome on Linux
 //sauceTestWorker.push({
@@ -104,11 +104,11 @@ sauceTestWorker.push({
 //});
 //
 //// 4) Safari on OSX 10.14
-//sauceTestWorker.push({
-//    'platform'       : 'OS X 10.14'
-//  , 'browserName'    : 'safari'
-//  , 'version'        : '12.0'
-//});
+sauceTestWorker.push({
+    'platform'       : 'OS X 10.14'
+  , 'browserName'    : 'safari'
+  , 'version'        : '12.0'
+});
 // IE 10 doesn't appear to be working anyway
 /*
 // 4) IE 10 on Win 8
