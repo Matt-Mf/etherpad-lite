@@ -1,4 +1,4 @@
-describe("assign unordered list", function(){
+xdescribe("assign unordered list", function(){
   //create a new pad before each test run
   beforeEach(function(cb){
     helper.newPad(cb);
