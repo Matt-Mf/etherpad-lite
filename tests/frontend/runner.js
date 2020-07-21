@@ -22,8 +22,8 @@ $(function(){
 
   function CustomRunner(runner) {
     var self = this
-      , stats = this.stats = { suites: 0, tests: 0, passes: 0, pending: 0, failures: 0 }
-      , failures = this.failures = [];
+      , stats = { suites: 0, tests: 0, passes: 0, pending: 0, failures: 0 }
+      , failures = [];
 
     if (!runner) return;
     this.runner = runner;
