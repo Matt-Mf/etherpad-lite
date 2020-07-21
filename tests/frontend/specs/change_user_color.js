@@ -1,4 +1,4 @@
-xdescribe("change user color", function(){
+describe("change user color", function(){
   //create a new pad before each test run
   beforeEach(function(cb){
     helper.newPad(cb);
