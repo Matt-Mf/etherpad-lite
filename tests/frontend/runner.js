@@ -26,7 +26,6 @@ $(function(){
       , failures = [];
 
     if (!runner) return;
-    this.runner = runner;
 
     runner.on('start', function(){
       stats.start = new Date;
