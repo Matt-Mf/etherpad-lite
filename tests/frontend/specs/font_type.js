@@ -1,4 +1,4 @@
-describe("font select", function(){
+xdescribe("font select", function(){
   //create a new pad before each test run
   beforeEach(function(cb){
     helper.newPad(cb);
