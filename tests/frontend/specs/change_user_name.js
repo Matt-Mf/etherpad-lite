@@ -1,4 +1,4 @@
-describe("change username value", function(){
+xdescribe("change username value", function(){
   //create a new pad before each test run
   beforeEach(function(cb){
     helper.newPad(cb);
