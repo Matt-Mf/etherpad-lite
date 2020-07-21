@@ -1,4 +1,4 @@
-xdescribe('author of pad edition', function() {
+describe('author of pad edition', function() {
   // author 1 creates a new pad with some content (regular lines and lists)
   before(function(done) {
     var padId = helper.newPad(function() {
