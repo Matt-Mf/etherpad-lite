@@ -1,4 +1,4 @@
-xdescribe("select formatting buttons when selection has style applied", function(){
+describe("select formatting buttons when selection has style applied", function(){
   var STYLES = ['italic', 'bold', 'underline', 'strikethrough'];
   var SHORTCUT_KEYS = ['I', 'B', 'U', '5']; // italic, bold, underline, strikethrough
   var FIRST_LINE = 0;
