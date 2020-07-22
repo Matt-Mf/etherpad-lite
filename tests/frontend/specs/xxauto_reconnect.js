@@ -57,7 +57,7 @@ describe('Automatic pad reload on Force Reconnect message', function() {
     this.timeout(10000);
 
     beforeEach(function() {
-      $originalPadFrame.one('load', function() {
+      $originalPadFrame.on('load', function() {
         padWasReloaded = true;
       });
     });
